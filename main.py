@@ -75,6 +75,8 @@ def create_rar_extractor_agent():
         llm=LLm
     )
 
+def cache_func(args, result):
+    return False
 
 def create_csv_analyzer_agent(csv_filename):
     """Cria o agente de análise CSV."""
@@ -85,6 +87,7 @@ def create_csv_analyzer_agent(csv_filename):
         description="Ferramenta para pesquisar informações detalhadas dos itens/produtos das notas fiscais, incluindo descrições, quantidades, valores unitários e totais"
     )
     
+    CSVSearchTool.cache_function = cache_func  # Desabilita o cache para evitar problemas com CSVs grandes
     return Agent(
         role="Analista de compras",
         goal="Analisar o arquivo csv fornecido e responder a perguntas que serão feitas sobre valores e produtos destas compras",
