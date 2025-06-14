@@ -78,25 +78,42 @@ def create_rar_extractor_agent():
 def cache_func(args, result):
     return False
 
+
 def create_csv_analyzer_agent(csv_filename):
     """Cria o agente de análise CSV."""
     csv_path = f"dados/{csv_filename}"
     
     csvTool = CSVSearchTool(
         csv=csv_path,
-        description="Ferramenta para pesquisar informações detalhadas dos itens/produtos das notas fiscais, incluindo descrições, quantidades, valores unitários e totais"
+        description="Ferramenta para pesquisar informações detalhadas dos itens/produtos das notas fiscais, incluindo descrições, quantidades, valores unitários e totais",
+# Remover a configuração de LLM da ferramenta para evitar conflitos
+        # A ferramenta usará o LLM já configurado globalmente
     )
-    
-    CSVSearchTool.cache_function = cache_func  # Desabilita o cache para evitar problemas com CSVs grandes
+
+    # CORREÇÃO: Criar e retornar o agente
     return Agent(
-        role="Analista de compras",
-        goal="Analisar o arquivo csv fornecido e responder a perguntas que serão feitas sobre valores e produtos destas compras",
-        backstory="Você é um especialista em análise de compras.",
+        role='Analista de Dados CSV',
+        goal=f'Analisar dados do arquivo CSV {csv_filename} e responder perguntas sobre as informações contidas',
+        backstory=f"""
+        Você é um especialista em análise de dados CSV equipado com ferramentas especializadas.
+        Sua função é analisar o arquivo {csv_filename} na pasta 'dados' e fornecer 
+        insights detalhados sobre os dados.
+        
+        Quando receber uma pergunta sobre os dados, você deve:
+        1. Usar a ferramenta CSV para buscar informações relevantes
+        2. Analisar todos os registros necessários
+        3. Fornecer uma resposta completa e detalhada
+        4. Sempre confirmar quantos registros foram analisados
+        
+        IMPORTANTE: Use sempre a ferramenta CSV para acessar os dados!
+        """,
+        verbose=False,
+        allow_delegation=False,
         tools=[csvTool],
-        verbose=False,  
-        allow_code_execution=True,
         llm=LLm
     )
+
+   
 
 
 def create_extraction_task(rar_filename: str, agent: Agent) -> Task:
