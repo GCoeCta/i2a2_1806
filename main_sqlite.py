@@ -15,6 +15,8 @@ from tools.rar_tools import RarExtractorTool, create_rar_extractor_tool, check_e
 # Carrega as variáveis de ambiente
 load_dotenv()
 
+teste = 2
+
 import warnings
 warnings.filterwarnings("ignore", category=SyntaxWarning)
 warnings.filterwarnings("ignore", module="pydantic")
