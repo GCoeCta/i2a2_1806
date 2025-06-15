@@ -78,75 +78,17 @@ def get_available_columns(db_path: str) -> dict:
         return {'type': 'error', 'error': str(e)}
 
 def get_database_statistics(db_path: str) -> dict:
-    """Obtém estatísticas adaptadas ao tipo de arquivo"""
+    """Obtém estatísticas básicas do arquivo"""
     try:
-        col_info = get_available_columns(db_path)
-        
-        if col_info['type'] == 'error':
-            return {'error': col_info['error']}
-        
         conn = sqlite3.connect(db_path)
         
-        # Estatísticas básicas
+        # Apenas o total de registros
         total_registros = pd.read_sql_query("SELECT COUNT(*) as total FROM notas_fiscais", conn).iloc[0]['total']
-        
-        # Valor total (adaptado ao tipo de arquivo)
-        valor_total = 0
-        if col_info['valor_column']:
-            query = f"SELECT SUM({col_info['valor_column']}) as soma FROM notas_fiscais WHERE {col_info['valor_column']} IS NOT NULL"
-            result = pd.read_sql_query(query, conn).iloc[0]['soma']
-            valor_total = result or 0
-        
-        # Estados únicos
-        estados_unicos = 0
-        if col_info['uf_emitente']:
-            result = pd.read_sql_query("SELECT COUNT(DISTINCT uf_emitente) as estados FROM notas_fiscais WHERE uf_emitente IS NOT NULL", conn).iloc[0]['estados']
-            estados_unicos = result or 0
-        
-        # Empresas únicas
-        empresas_unicas = 0
-        if col_info['razao_social_emitente']:
-            result = pd.read_sql_query("SELECT COUNT(DISTINCT razao_social_emitente) as empresas FROM notas_fiscais WHERE razao_social_emitente IS NOT NULL", conn).iloc[0]['empresas']
-            empresas_unicas = result or 0
-        
-        # Estatísticas específicas por tipo
-        extra_stats = {}
-        
-        if col_info['type'] == 'header':
-            # Para arquivo de cabeçalhos
-            extra_stats['tipo'] = 'Arquivo de Cabeçalhos (Notas Fiscais)'
-            extra_stats['label_valor'] = 'Valor Total das NFs'
-            extra_stats['label_registros'] = 'Total de Notas Fiscais'
-            
-            # Média por nota fiscal
-            if valor_total > 0 and total_registros > 0:
-                extra_stats['valor_medio'] = valor_total / total_registros
-        
-        elif col_info['type'] == 'items':
-            # Para arquivo de itens
-            extra_stats['tipo'] = 'Arquivo de Itens (Produtos)'
-            extra_stats['label_valor'] = 'Valor Total dos Itens'
-            extra_stats['label_registros'] = 'Total de Itens'
-            
-            # Produtos únicos
-            if col_info['has_products']:
-                result = pd.read_sql_query("SELECT COUNT(DISTINCT descricao_do_produto_servico) as produtos FROM notas_fiscais WHERE descricao_do_produto_servico IS NOT NULL", conn).iloc[0]['produtos']
-                extra_stats['produtos_unicos'] = result or 0
-        
-        else:
-            extra_stats['tipo'] = 'Tipo Desconhecido'
-            extra_stats['label_valor'] = 'Valor Total'
-            extra_stats['label_registros'] = 'Total de Registros'
         
         conn.close()
         
         return {
-            'total_registros': total_registros,
-            'valor_total': valor_total,
-            'estados_unicos': estados_unicos,
-            'empresas_unicas': empresas_unicas,
-            'column_info': col_info,
-            **extra_stats
+            'total_registros': total_registros
         }
         
     except Exception as e:
@@ -315,7 +257,7 @@ def clean_data(df: pd.DataFrame) -> pd.DataFrame:
     
     return df
 
-# Tools para CrewAI
+# Tools para Crewai
 def create_database_tools(db_path: str):
     """Cria as tools para acesso ao banco de dados"""
     
@@ -415,11 +357,13 @@ def create_rar_extractor_agent():
     )
 
 def create_csv_analyzer_agent(db_path: str):
+
     """Cria o agente de análise usando SQLite."""
     query_tool, schema_tool = create_database_tools(db_path)
     
     # Detecta o tipo de arquivo para ajustar o backstory
     col_info = get_available_columns(db_path)
+
     file_type_info = ""
     
     if col_info['type'] == 'header':
@@ -428,7 +372,7 @@ def create_csv_analyzer_agent(db_path: str):
         - Use 'valor_nota_fiscal' para valores monetários (não 'valor_total')
         - Cada registro representa uma NOTA FISCAL completa
         - NÃO há informações de produtos individuais
-        - Foque em análises de notas fiscais, empresas, fluxo entre estados
+        - Foque em análises de notas fiscais, empresas, fluxo entre emitente e destinatário
         """
     elif col_info['type'] == 'items':
         file_type_info = """
@@ -455,6 +399,7 @@ def create_csv_analyzer_agent(db_path: str):
         - Análises geográficas (por UF, município)
         - Análises de produtos (quando disponível)
         - Análises de operações (CFOP, natureza da operação)
+        - Identificação de principais emitentes e destinatários por valor total
         
         SEMPRE use get_schema_info com parâmetro 'columns' PRIMEIRO para entender 
         exatamente quais colunas estão disponíveis antes de gerar consultas SQL.""",
@@ -467,21 +412,26 @@ def create_csv_analyzer_agent(db_path: str):
 def create_business_analyst_agent():
     """Cria o agente analista de negócios."""
     return Agent(
-        role='Analista de Negócios Fiscais',
-        goal='Interpretar resultados de consultas SQL e fornecer insights de negócio relevantes',
-        backstory="""Você é um analista de negócios especializado em interpretar 
-        dados fiscais para gerar insights estratégicos. Você consegue transformar 
-        números em histórias e recomendações práticas.
+        role='Formatador de Respostas Diretas',
+        goal='Apresentar apenas os dados solicitados de forma concisa e objetiva',
+        backstory="""Você é especializado em fornecer respostas diretas e concisas.
         
-        Suas competências incluem:
-        - Interpretação de tendências de vendas
-        - Análise de performance por região
-        - Identificação de oportunidades de mercado
-        - Análise de sazonalidade
-        - Recomendações estratégicas baseadas em dados
-        - Identificação de riscos e oportunidades
+        REGRAS IMPORTANTES:
+        - Forneça APENAS os dados solicitados
+        - NÃO adicione análises, insights ou recomendações
+        - NÃO faça interpretações ou contextualizações
+        - Use formato simples e direto
+        - Para rankings: liste apenas nome e valor
+        - Para totais: informe apenas o valor
+        - Para contagens: informe apenas o número
         
-        Você sempre fornece contexto e significado aos números apresentados.""",
+        Exemplos de respostas corretas:
+        - "Produto mais caro: NOTEBOOK DELL - R$ 3.500,00"
+        - "Principal emitente: EMPRESA ABC LTDA - R$ 1.250.000,00"
+        - "Total de registros: 1.524"
+        
+        NUNCA adicione frases como "Este resultado mostra...", "Podemos observar...", 
+        "Recomenda-se..." ou qualquer texto explicativo.""",
         verbose=False,
         llm=LLm
     )
@@ -548,17 +498,24 @@ def create_analysis_task(pergunta: str, sql_agent: Agent, business_agent: Agent)
     
     business_task = Task(
         description=f"""
-        Com base nos dados extraídos para "{pergunta}", 
-        forneça análise de negócio completa.
+        Com base nos dados SQL para "{pergunta}", forneça uma resposta DIRETA e CONCISA.
         
-        Inclua:
-        - Resumo dos principais achados
-        - Interpretação dos números
-        - Insights e tendências
-        - Recomendações quando apropriado
+        REGRAS OBRIGATÓRIAS:
+        - Apresente APENAS os dados solicitados
+        - NÃO adicione análises, insights ou interpretações
+        - NÃO faça recomendações ou contextualizações
+        - Use formato simples: "Nome/Item - Valor" ou apenas o número/valor solicitado
+        - Para listas: máximo 10 itens
+        - Para valores monetários: use formato "R$ X,XX"
+        
+        Exemplos do formato esperado:
+        - "PRODUTO XYZ - R$ 1.500,00"
+        - "EMPRESA ABC LTDA - R$ 2.300.000,00" 
+        - "1.234 registros"
+        - "SP: R$ 500.000,00"
         """,
         agent=business_agent,
-        expected_output="Análise de negócio com insights práticos",
+        expected_output="Resposta direta com apenas os dados solicitados, sem análises adicionais",
         context=[sql_task]
     )
     
@@ -615,7 +572,7 @@ def execute_with_retry(crew, inputs=None):
 def main():
     # Header
     st.title("🗂️ I2A2 - Análise Inteligente de Notas Fiscais")
-    st.markdown("### Sistema avançado com SQLite para extração de arquivos RAR e análise de dados de notas fiscais")
+    st.markdown("### Sistema com SQLite para extração de arquivos RAR e análise de dados de notas fiscais")
     
     # Sidebar
     st.sidebar.title("⚙️ Configurações")
@@ -779,7 +736,7 @@ def main():
                         st.error(f"❌ Erro durante a extração: {str(e)}")
     
     with tab2:
-        st.header("📊 Análise Inteligente de Dados")
+        st.header("📊 Análise dos Dados")
         
         # Lista os bancos SQLite disponíveis
         db_files = find_db_files()
@@ -805,67 +762,8 @@ def main():
             if 'error' in stats:
                 st.warning(f"Não foi possível carregar estatísticas: {stats['error']}")
             else:
-                # Mostra o tipo de arquivo
-                if 'tipo' in stats:
-                    st.info(f"📋 **{stats['tipo']}**")
-                
-                # Exibe métricas adaptadas
-                if stats['column_info']['type'] == 'header':
-                    # Métricas para arquivo de cabeçalhos
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        st.metric("📄 Total de Notas Fiscais", f"{stats['total_registros']:,}")
-                    
-                    with col2:
-                        st.metric("💰 Valor Total das NFs", f"R$ {stats['valor_total']:,.2f}")
-                    
-                    with col3:
-                        st.metric("🗺️ Estados Emitentes", stats['estados_unicos'])
-                    
-                    with col4:
-                        if 'valor_medio' in stats:
-                            st.metric("📊 Valor Médio por NF", f"R$ {stats['valor_medio']:,.2f}")
-                        else:
-                            st.metric("🏢 Empresas", stats['empresas_unicas'])
-                
-                elif stats['column_info']['type'] == 'items':
-                    # Métricas para arquivo de itens
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        st.metric("📦 Total de Itens", f"{stats['total_registros']:,}")
-                    
-                    with col2:
-                        st.metric("💰 Valor Total dos Itens", f"R$ {stats['valor_total']:,.2f}")
-                    
-                    with col3:
-                        if 'produtos_unicos' in stats:
-                            st.metric("📋 Produtos Únicos", stats['produtos_unicos'])
-                        else:
-                            st.metric("🗺️ Estados", stats['estados_unicos'])
-                    
-                    with col4:
-                        st.metric("🏢 Empresas", stats['empresas_unicas'])
-                
-                else:
-                    # Métricas genéricas
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        st.metric("📊 Total de Registros", f"{stats['total_registros']:,}")
-                    
-                    with col2:
-                        if stats['valor_total'] > 0:
-                            st.metric("💰 Valor Total", f"R$ {stats['valor_total']:,.2f}")
-                        else:
-                            st.metric("💰 Valor Total", "N/A")
-                    
-                    with col3:
-                        st.metric("🗺️ Estados", stats['estados_unicos'])
-                    
-                    with col4:
-                        st.metric("🏢 Empresas", stats['empresas_unicas'])
+                # Exibe apenas o total de registros
+                st.metric("📊 Total de Registros", f"{stats['total_registros']:,}")
             
             st.markdown("---")
             
@@ -878,133 +776,17 @@ def main():
                 st.code(sample_info, language="text")
             
             # Campo para a pergunta
-            pergunta = st.text_area(
+            pergunta = st.text_input(
                 "❓ Digite sua pergunta sobre os dados:",
-                placeholder="Ex: Quais são os 5 produtos mais vendidos por valor total?\nQual foi o faturamento por estado emitente?\nComo estão distribuídas as vendas por mês?",
-                height=100
+                placeholder="Ex: Qual o produto com maior valor unitário ? Qual o principal emitente de notas fiscais ?",
             )
-            
-            # Sugestões de perguntas adaptadas ao tipo de arquivo
-            col_info = get_available_columns(db_path)
-            
-            st.markdown("💡 **Sugestões de perguntas:**")
-            
-            col1, col2 = st.columns(2)
-            
-            if col_info['type'] == 'header':
-                # Sugestões para arquivo de cabeçalhos
-                with col1:
-                    st.markdown("""
-                    **📄 Análises de Notas Fiscais:**
-                    - Qual foi o valor total das notas fiscais?
-                    - Quantas notas fiscais foram emitidas?
-                    - Qual é o valor médio por nota fiscal?
-                    - Quais empresas emitiram mais notas?
-                    
-                    **📅 Análises Temporais:**
-                    - Como estão distribuídas as emissões por mês?
-                    - Qual dia da semana tem mais emissões?
-                    - Evolução das emissões ao longo do tempo
-                    """)
-                
-                with col2:
-                    st.markdown("""
-                    **🗺️ Análises Geográficas:**
-                    - Quais estados mais emitem notas fiscais?
-                    - Para quais estados as notas são destinadas?
-                    - Fluxo de notas fiscais entre estados
-                    
-                    **🏢 Análises de Empresas:**
-                    - Ranking de empresas por valor de notas
-                    - Empresas por quantidade de notas emitidas
-                    - Análise por natureza da operação
-                    """)
-                
-                # Botões de exemplo para cabeçalhos
-                example_questions = [
-                    "Qual foi o valor total das notas fiscais?",
-                    "Quais empresas emitiram mais notas fiscais?",
-                    "Como estão distribuídas as emissões por estado?",
-                    "Qual é o valor médio por nota fiscal?"
-                ]
-            
-            elif col_info['type'] == 'items':
-                # Sugestões para arquivo de itens
-                with col1:
-                    st.markdown("""
-                    **📦 Análises de Produtos:**
-                    - Quais são os 10 produtos mais vendidos?
-                    - Produtos com maior valor unitário
-                    - Análise por tipo de NCM
-                    - Ranking por quantidade vendida
-                    
-                    **💰 Análises Financeiras:**
-                    - Valor total de vendas por produto
-                    - Valor médio por item
-                    - Produtos mais lucrativos
-                    """)
-                
-                with col2:
-                    st.markdown("""
-                    **🗺️ Análises Geográficas:**
-                    - Vendas por estado de origem
-                    - Principais destinos por produto
-                    - Fluxo de produtos entre estados
-                    
-                    **📊 Análises Operacionais:**
-                    - Análise por CFOP
-                    - Natureza das operações
-                    - Quantidade vs Valor
-                    """)
-                
-                # Botões de exemplo para itens
-                example_questions = [
-                    "Quais são os 5 produtos mais vendidos por valor?",
-                    "Qual foi o faturamento total por estado?",
-                    "Quais produtos têm maior valor unitário?",
-                    "Como estão distribuídas as vendas por NCM?"
-                ]
-            
-            else:
-                # Sugestões genéricas
-                with col1:
-                    st.markdown("""
-                    **📊 Análises Básicas:**
-                    - Qual o total de registros?
-                    - Distribuição por estado
-                    - Análise temporal dos dados
-                    """)
-                
-                with col2:
-                    st.markdown("""
-                    **🔍 Análises Exploratórias:**
-                    - Principais empresas
-                    - Padrões nos dados
-                    - Estatísticas gerais
-                    """)
-                
-                example_questions = [
-                    "Quantos registros temos no total?",
-                    "Quais são os principais estados?",
-                    "Como estão distribuídos os dados?",
-                    "Quais são as principais empresas?"
-                ]
-            
-            # Botões de exemplo
-            st.markdown("🚀 **Clique para testar:**")
-            cols = st.columns(2)
-            for i, question in enumerate(example_questions):
-                with cols[i % 2]:
-                    if st.button(f"💭 {question[:30]}...", key=f"example_{i}"):
-                        pergunta = question
-                        st.rerun()
             
             # Botão para iniciar a análise
             if st.button("🔍 Analisar Dados", type="primary", key="analyze_button"):
                 if not pergunta:
                     st.warning("⚠️ Por favor, digite uma pergunta antes de analisar.")
                 else:
-                    with st.spinner("🤖 Processando com IA avançada..."):
+                    with st.spinner("🤖 Processando..."):
                         try:
                             # Cria os agentes
                             sql_agent = create_csv_analyzer_agent(db_path)
